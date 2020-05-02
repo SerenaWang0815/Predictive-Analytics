@@ -1,0 +1,251 @@
+---
+title: "HW2"
+author: "Group 7"
+date: "11/5/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE}
+library(readxl)
+library(dplyr)
+library(plyr)
+meta<-read_excel("C:/Users/14695/Desktop/Movies_Clean/movies_metadata_v1.xlsx")
+link<-read.csv("C:/Users/14695/Desktop/Movies_Clean/links.csv")
+rating<-read.csv("C:/Users/14695/Desktop/Movies_Clean/ratings.csv")
+```
+```{r echo=FALSE}
+#Calculate average rating from Grouplens and count voter
+meta_v2<-merge(x=meta,y=link,by="imdb_id",all.x = TRUE)
+rating_v2<-ddply(rating,.(movieId),summarize,rating_avg=mean(rating))
+count<-count(rating,"movieId")
+rating_v3<-merge(x=rating_v2,y=count,by="movieId")
+#join meta data with rating data
+meta_v3<-merge(x=meta_v2,y=rating_v3,by="movieId",all.x=TRUE)
+```
+```{r echo=FALSE}
+#Calculate overall rating and order dataset by rating
+meta_v4<-mutate(meta_v3,rating_all=(vote_average/2*vote_count+rating_avg*freq)/(vote_count+freq))
+meta_v4<-arrange(meta_v4,desc(rating_all))
+```
+```{r echo=FALSE}
+#gather dataset to reduce number of column
+library(tidyr)
+meta_v5<-gather(meta_v4,key="genre_t",value="genre",genre1,genre2,genre3,genre4,genre5,genre6,genre7,genre8,na.rm = TRUE,factor_key = TRUE)
+```
+```{r echo=FALSE}
+#convert genre to dummy variable
+meta_v6<-fastDummies::dummy_cols(meta_v5,select_columns = "genre")
+meta_v6<-select(meta_v6,-c(genre_t,genre))
+#delete rows containing missing values of rating_all
+meta_v7<-filter(meta_v6,is.na(rating_all)==FALSE)
+```
+```{r echo=FALSE}
+#remove duplicated rows and prepare for join
+meta_v8<-read.csv("C:/Users/14695/Desktop/Movies_Clean/meta_v8.csv")
+meta_v8<-unique(meta_v8)
+#group by genre by movieID
+genre_uni<-read_excel("C:/Users/14695/Desktop/Movies_Clean/genre_uni.xlsx")
+meta_v9<-merge(x=meta_v8,y=genre_uni,by="movieId")
+```
+```{r echo=FALSE}
+#combine popularity and release month,day,year
+meta_v0<-read.csv("C:/Users/14695/Desktop/Movies_Clean/movies_metadata_v0.csv")
+meta_v10<-merge(x=meta_v9,y=meta_v0,by="id",all.x = TRUE)
+```
+```{r echo=FALSE}
+#import dataset with production company and production country
+pro_com_cty<-read.csv("C:/Users/14695/Desktop/Movies_Clean/Pro_com_cty.csv")
+meta_v11<-merge(x=meta_v10,y=pro_com_cty,by="movieId",all.x = TRUE)
+```
+```{r echo=FALSE}
+#calculate mean rating for each production company
+rating_by_company<-ddply(meta_v11,.(main_pro_com),summarize,rating_by_com=mean(rating_all)) 
+```
+```{r echo=FALSE}
+#divide each company into 4 tiers and label each of them
+tier_com<-cut(rating_by_company$rating_by_com,breaks = c(0,2.8625,3.1791,3.4671,5),labels = c("T4","T3","T2","T1"))
+rating_by_company<-mutate(rating_by_company,tier_com=tier_com)
+```
+```{r,echo=FALSE}
+#combine tiers of production company back to original dataset
+meta_v12<-merge(x=meta_v11,y=rating_by_company,by="main_pro_com",all.x=TRUE)
+```
+```{r echo= FALSE}
+rating_by_country<-ddply(meta_v12,.(main_pro_cty),summarize,rating_by_cty=mean(rating_all)) 
+```
+```{r echo=FALSE}
+#divide each country into 4 tiers and label each of them
+tier_cty<-cut(rating_by_country$rating_by_cty,breaks = c(0,3.110,3.292,3.507,5),labels = c("T4","T3","T2","T1"))
+rating_by_country<-mutate(rating_by_country,tier_cty=tier_cty)
+```
+```{r echo=FALSE}
+#combine tiers of production country back to original dataset
+meta_v13<-merge(x=meta_v12,y=rating_by_country,by="main_pro_cty",all.x=TRUE)
+```
+```{r echo=FALSE}
+#convert rating_all to binary variable
+movie_final<-read_excel("C:/Users/14695/Desktop/Movies_Clean/movie_final.xlsx")
+summary(movie_final$rating_all)
+tier_rating<-cut(movie_final$rating_all,breaks = c(0,3.4808,5.1),labels=c("bad","good"))
+movie_final<-mutate(movie_final,score=tier_rating)
+```
+```{r echo=FALSE}
+#Quick sidenote: an intercept only model
+logReg1 = glm(score~1,movie_final,family=binomial)
+int     = coef(logReg1)[1]
+exp(int)/(1+exp(int))
+mean(movie_final$score=="good")
+```
+```{r echo=FALSE}
+#develop model
+logReg2=glm(score~budget+popularity+runtime,movie_final,family=binomial)
+summary(logReg2)
+```
+```{r echo=FALSE}
+logReg3 = update(logReg2,. ~ . + tier_com)
+summary(logReg3)
+```
+```{r echo=FALSE}
+logReg4 = update(logReg3,. ~ . + tier_cty)
+summary(logReg4)
+```
+```{r echo=FALSE}
+movie_final$release_month<-as.factor(movie_final$release_month)
+logReg5 = update(logReg3,. ~ . + release_month)
+summary(logReg5)
+```
+```{r echo=FALSE}
+logReg6 = glm(score~., movie_final,family=binomial)
+summary(logReg6)
+```
+```{r echo=FALSE}
+logReg7=glm(score~budget+popularity+runtime+tier_com+release_month+genre_Action +genre_Documentary +genre_Drama +genre_Comedy +genre_Horror +genre_Family+genre_War +genre_Romance +genre_Thriller +genre_Crime +genre_Animation+genre_Western,movie_final,family=binomial)
+summary(logReg7)
+```
+
+```{r echo=FALSE}
+logRegFin=logReg7
+pred = predict(logRegFin,type="response") #This is the probability that the score is a "good score"
+pred[pred>=.45] = "good"
+pred[pred!="good"] = "bad"
+
+#classification matrix
+classMatrix = table(pred,movie_final$score) #first variable is by row, the second is by column
+classMatrix
+#Interpret this, is it good?
+sum(diag(classMatrix))/sum(classMatrix)
+```
+```{r echo=FALSE}
+betahat = coef(logRegFin)
+logitFun = function(yhat) {1/(1+exp(-yhat))}
+#set runtime=90,calculate probability
+x_runtime1=c(1,26957381,9,90,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+#Pr(runtime=90)
+logitFun(x_runtime1%*%betahat)#13.83%
+#Pr(runtime=91)
+X_runtime2= x_runtime1
+X_runtime2[4] = 91
+logitFun(X_runtime2%*%betahat)
+#Pr(runtime=91)-#Pr(runtime=90)
+logitFun(X_runtime2%*%betahat)-logitFun(x_runtime1%*%betahat)#0.19%
+#Pr(runtime=120)
+X_runtime3= x_runtime1
+X_runtime3[4] = 120
+logitFun(X_runtime3%*%betahat)#20.6%
+#Pr(runtime=121)
+X_runtime4= x_runtime1
+X_runtime4[4] = 121
+logitFun(X_runtime4%*%betahat)
+logitFun(X_runtime4%*%betahat)-logitFun(X_runtime3%*%betahat)#0.26%
+```
+```{r}
+summary(movie_final)
+```
+```{r echo=FALSE}
+#set popularity=4.6935,calculate probability
+x_pop1=c(1,26957381,4.6935,108.1,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+#Pr(popularity=4.6935)
+logitFun(x_pop1%*%betahat)#14.59%
+#Pr(popularity=5.6935)
+X_pop2= x_pop1
+X_pop2[3] = 5.6935
+logitFun(X_pop2%*%betahat)
+#Pr(popularity=4.6935)marginal effect
+logitFun(X_pop2%*%betahat)-logitFun(x_pop1%*%betahat)#0.87%
+#Pr(popularity=11.1533)
+X_pop3= x_pop1
+X_pop3[3] =11.1533 
+logitFun(X_pop3%*%betahat)#20.97%
+#Pr(popularity=12.1533)
+X_pop4= x_pop1
+X_pop4[3] = 12.1533
+logitFun(X_pop4%*%betahat)
+#Pr(popularity=11.1533)marginal effect
+logitFun(X_pop4%*%betahat)-logitFun(X_pop3%*%betahat)#1.15%
+```
+```{r echo=FALSE}
+#Pr(Tier_com=1)
+x_T1=c(1,26957381,4.6935,108.1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_T1%*%betahat)
+#Pr(Tier_com=2)
+x_T2=c(1,26957381,4.6935,108.1,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_T2%*%betahat)
+#Pr(Tier_com=3)
+x_T3=c(1,26957381,4.6935,108.1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_T3%*%betahat)
+#Pr(Tier_com=4)
+x_T4=c(1,26957381,4.6935,108.1,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_T4%*%betahat)
+```
+```{r echo=FALSE}
+#release month = December
+x_M12=c(1,26957381,4.6935,108.1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_M12%*%betahat)#22.94%
+#release month = June
+x_M6=c(1,26957381,4.6935,108.1,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_M6%*%betahat)#18.98%
+#release month = "Normal"
+x_M6=c(1,26957381,4.6935,108.1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_M6%*%betahat)#13.78%
+```
+```{r echo=FALSE}
+#genre=Animation
+x_ani=c(1,26957381,4.6935,108.1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0)
+logitFun(x_ani%*%betahat)#28.58%
+#genre=Horror
+x_hor=c(1,26957381,4.6935,108.1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0)
+logitFun(x_hor%*%betahat)#5.86%
+#genre="Normal"
+x_nor=c(1,26957381,4.6935,108.1,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+logitFun(x_nor%*%betahat)#13.78%
+```
+```{r echo=FALSE}
+library(readxl)
+revenue_model<-read_excel("C:/Users/14695/Desktop/Movies_Clean/revenue model.xlsx")
+```
+```{r echo= FALSE}
+reg1<-lm(log(revenue)~budget+runtime+popularity,revenue_model)
+summary(reg1)
+```
+```{r echo=FALSE}
+reg2 = update(reg1,. ~ . + tier_com)
+summary(reg2)
+```
+```{r echo=FALSE}
+reg3 = update(reg1,. ~ . + tier_cty)
+summary(reg3)
+```
+```{r echo=FALSE}
+revenue_model$release_month<-as.factor(revenue_model$release_month)
+reg4 = update(reg3,. ~ . + release_month)
+summary(reg4)
+```
+```{r echo=FALSE}
+reg5<-lm(log(revenue)~log(budget)+runtime+rating_all+release_month+genre_Music+genre_Action+genre_Documentary+genre_Drama+genre_Mystery+genre_History+genre_Comedy+genre_Horror+genre_Family+genre_Adventure+genre_War+genre_TV_Movie+genre_Romance+genre_Thriller+genre_Crime+genre_Animation+genre_Fantasy+genre_Science_Fiction+genre_Western+genre_Foreign,revenue_model)
+summary(reg5)
+RegFin=reg5
+```
